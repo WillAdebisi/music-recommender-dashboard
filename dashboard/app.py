@@ -1,13 +1,13 @@
 import sys
 from pathlib import Path
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-if str(ROOT_DIR) not in sys.path:
-    sys.path.append(str(ROOT_DIR))
 import shutil
 import pandas as pd
 import matplotlib.pyplot as plt
 import streamlit as st
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.append(str(ROOT_DIR))
 
 from src.pipeline import run_full_pipeline
 
@@ -17,7 +17,9 @@ st.set_page_config(
     layout="wide"
 )
 
-RAW_DIR = Path("data/raw")
+RAW_DIR = ROOT_DIR / "data" / "raw"
+DEMO_DIR = ROOT_DIR / "demo_data"
+
 RAW_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -32,6 +34,28 @@ def clear_raw_dir():
             item.unlink()
         elif item.is_dir():
             shutil.rmtree(item)
+
+
+def copy_demo_files():
+    clear_raw_dir()
+    required = {
+        "spotify_MUSIC_only (1).csv",
+        "Apple Music Play Activity.csv",
+        "Apple Music - Track Play History.csv",
+        "Apple Music - Container Details (1).csv",
+    }
+
+    missing = [name for name in required if not (DEMO_DIR / name).exists()]
+    if missing:
+        raise FileNotFoundError(f"Missing demo files: {missing}")
+
+    for name in required:
+        shutil.copy2(DEMO_DIR / name, RAW_DIR / name)
+
+
+@st.cache_data
+def cached_run_pipeline(raw_dir_str: str):
+    return run_full_pipeline(raw_dir_str)
 
 
 def plot_similarity(similarity_results: dict):
@@ -64,50 +88,7 @@ def plot_feature_importance(importances: pd.Series):
     st.pyplot(fig)
 
 
-st.title("🎵 Personalized Music Recommender Dashboard")
-st.caption("Upload Spotify and Apple Music data, compare two users, and generate cross-platform recommendations.")
-
-with st.sidebar:
-    st.header("Upload data")
-    spotify_file = st.file_uploader("Spotify CSV", type=["csv"], key="spotify")
-    apple_activity = st.file_uploader("Apple Music Play Activity CSV", type=["csv"], key="apple_activity")
-    apple_history = st.file_uploader("Apple Track Play History CSV", type=["csv"], key="apple_history")
-    apple_container = st.file_uploader("Apple Container Details CSV", type=["csv"], key="apple_container")
-
-    run_button = st.button("Run analysis", type="primary")
-    reset_button = st.button("Clear uploaded files")
-
-if reset_button:
-    clear_raw_dir()
-    st.success("Cleared data/raw.")
-
-if run_button:
-    missing = []
-    if spotify_file is None:
-        missing.append("Spotify CSV")
-    if apple_activity is None:
-        missing.append("Apple Music Play Activity CSV")
-    if apple_history is None:
-        missing.append("Apple Track Play History CSV")
-    if apple_container is None:
-        missing.append("Apple Container Details CSV")
-
-    if missing:
-        st.error("Missing files: " + ", ".join(missing))
-        st.stop()
-
-    clear_raw_dir()
-
-    save_uploaded_file(spotify_file, RAW_DIR / "spotify_MUSIC_only (1).csv")
-    save_uploaded_file(apple_activity, RAW_DIR / "Apple Music Play Activity.csv")
-    save_uploaded_file(apple_history, RAW_DIR / "Apple Music - Track Play History.csv")
-    save_uploaded_file(apple_container, RAW_DIR / "Apple Music - Container Details (1).csv")
-
-    with st.spinner("Running full pipeline..."):
-        results = run_full_pipeline(str(RAW_DIR))
-
-    st.success("Analysis complete.")
-
+def render_results(results: dict):
     similarity_results = results["similarity_results"]
     cluster_summary = results["cluster_summary"]
     top_outliers = results["top_outliers"]
@@ -171,22 +152,65 @@ if run_button:
         st.write("Artist features shape:", artist_features.shape)
         st.dataframe(artist_features.head(50), use_container_width=True)
 
-    csv_a = rec_a.to_csv(index=False).encode("utf-8")
-    csv_b = rec_b.to_csv(index=False).encode("utf-8")
 
-    d1, d2 = st.columns(2)
-    d1.download_button(
-        "Download User A Recommendations",
-        data=csv_a,
-        file_name="recommendations_user_a.csv",
-        mime="text/csv"
-    )
-    d2.download_button(
-        "Download User B Recommendations",
-        data=csv_b,
-        file_name="recommendations_user_b.csv",
-        mime="text/csv"
-    )
+st.title("🎵 Personalized Music Recommender Dashboard")
+st.caption("Demo mode uses built-in files. Upload mode lets you test new datasets.")
+
+with st.sidebar:
+    st.header("Mode")
+    mode = st.radio("Choose how to run the dashboard", ["Use preloaded demo data", "Upload new files"])
+
+    run_demo = False
+    run_upload = False
+
+    if mode == "Use preloaded demo data":
+        st.success("Best choice for presenting live.")
+        run_demo = st.button("Run demo dataset", type="primary")
+
+    else:
+        spotify_file = st.file_uploader("Spotify CSV", type=["csv"], key="spotify")
+        apple_activity = st.file_uploader("Apple Music Play Activity CSV", type=["csv"], key="apple_activity")
+        apple_history = st.file_uploader("Apple Track Play History CSV", type=["csv"], key="apple_history")
+        apple_container = st.file_uploader("Apple Container Details CSV", type=["csv"], key="apple_container")
+        run_upload = st.button("Run uploaded dataset", type="primary")
+
+if run_demo:
+    try:
+        copy_demo_files()
+        with st.spinner("Running demo pipeline..."):
+            results = cached_run_pipeline(str(RAW_DIR))
+        st.success("Demo analysis complete.")
+        render_results(results)
+    except Exception as e:
+        st.error(f"Demo mode failed: {e}")
+
+elif run_upload:
+    missing = []
+    if spotify_file is None:
+        missing.append("Spotify CSV")
+    if apple_activity is None:
+        missing.append("Apple Music Play Activity CSV")
+    if apple_history is None:
+        missing.append("Apple Track Play History CSV")
+    if apple_container is None:
+        missing.append("Apple Container Details CSV")
+
+    if missing:
+        st.error("Missing files: " + ", ".join(missing))
+    else:
+        try:
+            clear_raw_dir()
+            save_uploaded_file(spotify_file, RAW_DIR / "spotify_MUSIC_only (1).csv")
+            save_uploaded_file(apple_activity, RAW_DIR / "Apple Music Play Activity.csv")
+            save_uploaded_file(apple_history, RAW_DIR / "Apple Music - Track Play History.csv")
+            save_uploaded_file(apple_container, RAW_DIR / "Apple Music - Container Details (1).csv")
+
+            with st.spinner("Running uploaded pipeline..."):
+                results = cached_run_pipeline(str(RAW_DIR))
+            st.success("Uploaded analysis complete.")
+            render_results(results)
+        except Exception as e:
+            st.error(f"Upload mode failed: {e}")
 
 else:
-    st.info("Upload the four CSV files in the sidebar, then click Run analysis.")
+    st.info("Choose demo mode for presentation or upload mode for new files.")

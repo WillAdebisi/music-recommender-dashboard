@@ -25,7 +25,7 @@ def run_full_pipeline(raw_data_dir: str = "data/raw") -> dict:
     knn_results = run_knn_classifier(track_features, n_neighbors=5)
     tree_results = run_decision_tree_classifier(track_features, max_depth=4)
 
-    clustered_df, kmeans_model = run_kmeans(track_features, n_clusters=3)
+    clustered_df, _ = run_kmeans(track_features, n_clusters=3)
     cluster_summary = summarize_clusters(clustered_df)
 
     artist_outliers = detect_outliers(artist_features)
